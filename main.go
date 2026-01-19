@@ -38,6 +38,8 @@ func main() {
 			changes := game.processMovementAction(action)
 
 			scene.processChanges(changes)
+
+			fmt.Println(game.field)
 		}
 	}()
 

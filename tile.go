@@ -18,12 +18,15 @@ var colorsMap = []rl.Color{
 	rl.DarkGreen,
 }
 
+func noUpdate(dt float32) {}
+
 type Tile struct {
 	value  int
 	x      int32
 	y      int32
 	width  int32
 	height int32
+	update func(dt float32)
 }
 
 func (tile *Tile) draw() {
@@ -39,26 +42,28 @@ func (tile *Tile) draw() {
 	}
 }
 
-func (tile *Tile) moveToAnimation(toX int32, toY int32, duration time.Duration) {
+func (tile *Tile) moveToAnimation(toX int32, toY int32, duration time.Duration) func(dt float32) {
+	rest := duration
+
 	fromX := tile.x
 	fromY := tile.y
 
-	startTime := time.Now()
+	update := func(dt float32) {
+		if rest < 0 {
+			return
+		}
 
-	ticker := time.NewTicker(100 * time.Millisecond)
-
-	dt := time.Duration(0)
-
-	for dt < duration {
-		tickTime := <-ticker.C
-		dt = tickTime.Sub(startTime)
-		fmt.Println(dt, duration)
-
-		t := float32(dt) / float32(duration)
+		t := dt / float32(duration)
 
 		tile.x = int32(lerp(float32(fromX), float32(toX), t))
 		tile.y = int32(lerp(float32(fromY), float32(toY), t))
+
+		rest -= time.Duration(dt * float32(time.Second))
+
+		if rest < 0 {
+			rest = 0
+		}
 	}
 
-	ticker.Stop()
+	return update
 }
