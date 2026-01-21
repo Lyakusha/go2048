@@ -116,6 +116,7 @@ func drawFieldBackground(cellSize int32, offset int32, leftOffset int32, topOffs
 }
 
 func (scene *Scene) getCoordinatesForPositionInGrid(x int, y int) (int32, int32) {
+	fmt.Println('a')
 	return scene.leftOffset + (scene.cellSize+scene.offset)*int32(x),
 		scene.topOffset + (scene.cellSize+scene.offset)*int32(y)
 }
