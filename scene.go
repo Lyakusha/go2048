@@ -2,32 +2,30 @@ package main
 
 import (
 	"fmt"
+	"strconv"
+	"sync"
 	"time"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+const title = "2048"
+
 type Scene struct {
-	game       *Game
-	actions    map[*Tile]func(dt float32)
-	tiles      map[Position]*Tile
-	leftOffset int32
-	topOffset  int32
-	offset     int32
-	cellSize   int32
-	width      int32
-	height     int32
+	game         *Game
+	tiles        map[Position]*Tile
+	leftOffset   int32
+	topOffset    int32
+	offset       int32
+	cellSize     int32
+	width        int32
+	height       int32
+	inputEnabled bool
 }
 
 func (scene *Scene) update(dt float32) {
 	for _, tile := range scene.tiles {
-		if tile.update != nil {
-			tile.update(dt)
-		}
-	}
-
-	for _, action := range scene.actions {
-		action(dt)
+		go tile.update(dt)
 	}
 }
 
@@ -35,7 +33,6 @@ func (scene *Scene) init() {
 	scene.leftOffset = (scene.width - int32(len(scene.game.field[0]))*scene.cellSize) / 2
 	scene.topOffset = (scene.height - int32(len(scene.game.field))*scene.cellSize) / 2
 	scene.tiles = scene.buildGrid(scene.game)
-	scene.actions = make(map[*Tile]func(dt float32))
 }
 
 func (scene *Scene) render() {
@@ -48,67 +45,82 @@ func (scene *Scene) render() {
 		tile.draw()
 	}
 
+	scene.drawTitle()
+	scene.drawScore()
+	scene.drawTimer()
+
 	rl.EndDrawing()
 }
 
+func (scene *Scene) drawTitle() {
+	var fontSize int32 = 30
+	textSize := rl.MeasureText(title, fontSize)
+	rl.DrawText("2048", scene.width/2-textSize/2, 50, fontSize, rl.Black)
+}
+
+func (scene *Scene) drawScore() {
+	scoreText := strconv.Itoa(scene.game.countScore())
+	var fontSize int32 = 20
+	textSize := rl.MeasureText(scoreText, fontSize)
+
+	rl.DrawText(scoreText, scene.leftOffset+SIZE*(scene.cellSize+scene.offset)-textSize, 100, fontSize, rl.Black)
+}
+
+func (scene *Scene) drawTimer() {
+	timer := time.Now().Sub(scene.game.startTime)
+
+	timerText := time.Unix(0, 0).Add(timer).Format("04:05")
+	var fontSize int32 = 20
+
+	rl.DrawText(timerText, scene.leftOffset-scene.offset, 100, fontSize, rl.Black)
+}
+
 func (scene *Scene) processChanges(changes []FieldChange) {
+	waitGroup := sync.WaitGroup{}
+
 	for _, change := range changes {
-		fmt.Println(change)
-
-		tile := scene.tiles[change.from]
-
-		fromX := tile.x
-		fromY := tile.y
-		toX := scene.leftOffset + (scene.cellSize+scene.offset)*int32(change.to.x)
-		toY := scene.topOffset + (scene.cellSize+scene.offset)*int32(change.to.y)
-		duration := 250 * time.Millisecond
-		rest := duration
-
-		scene.actions[tile] = func(dt float32) {
-			rest -= time.Duration(dt * float32(time.Second))
-
-			t := 1 - float32(rest)/float32(duration)
-
-			if t > 1 {
-				t = 1
-				delete(scene.actions, tile)
-
-				delete(scene.tiles, change.from)
-
-				if !change.remove {
-					scene.tiles[change.to] = tile
-				}
-
-				if change.merge {
-					tile.value = change.value
-				}
-
-				fmt.Println(scene.tiles)
-			}
-
-			tile.x = int32((1-t)*float32(fromX) + t*float32(toX))
-			tile.y = int32((1-t)*float32(fromY) + t*float32(toY))
-
-			fmt.Println(t)
+		if change.from == change.to {
+			continue
 		}
 
-		//waitGroup.Go(func() {
-		//		action := tile.moveToAnimation(scene.leftOffset+(scene.cellSize+scene.offset)*int32(change.to.x), scene.topOffset+(scene.cellSize+scene.offset)*int32(change.to.y), 2000*time.Millisecond)
-		//			scene.actions = append(scene.actions, action)
-		//
-		//			if change.merge {
-		//				tile.value = change.value
-		//			}
-		//		})
+		tile := scene.tiles[change.from]
+		toX := scene.leftOffset + (scene.cellSize+scene.offset)*int32(change.to.x)
+		toY := scene.topOffset + (scene.cellSize+scene.offset)*int32(change.to.y)
+		duration := 150 * time.Millisecond
+
+		animation := createMoveToAnimation(tile, toX, toY, duration)
+
+		tile.animations[animation] = true
+
+		waitGroup.Go(func() {
+			<-animation.stateChannel
+			delete(tile.animations, animation)
+		})
 	}
 
-	//scene.tiles = scene.buildGrid(scene.game)
+	waitGroup.Wait()
+
+	fmt.Println("changes processed")
+
+	scene.tiles = scene.buildGrid(scene.game)
 
 	if len(changes) > 0 {
 		newTilePosition, newTileValue := scene.game.field.addRandomTile()
 
-		scene.tiles[newTilePosition] = scene.build(newTilePosition, newTileValue)
+		newTile := scene.build(newTilePosition, newTileValue)
+
+		scene.tiles[newTilePosition] = newTile
+
+		animation := createShowTileAnimation(newTile, 150*time.Millisecond)
+		newTile.animations[animation] = true
+
+		waitGroup.Go(func() {
+			<-animation.stateChannel
+			delete(newTile.animations, animation)
+		})
 	}
+
+	waitGroup.Wait()
 }
 
 func drawFieldBackground(cellSize int32, offset int32, leftOffset int32, topOffset int32) {
@@ -116,7 +128,6 @@ func drawFieldBackground(cellSize int32, offset int32, leftOffset int32, topOffs
 }
 
 func (scene *Scene) getCoordinatesForPositionInGrid(x int, y int) (int32, int32) {
-	fmt.Println('a')
 	return scene.leftOffset + (scene.cellSize+scene.offset)*int32(x),
 		scene.topOffset + (scene.cellSize+scene.offset)*int32(y)
 }
@@ -125,11 +136,13 @@ func (scene *Scene) build(pos Position, value int) *Tile {
 	x, y := scene.getCoordinatesForPositionInGrid(pos.x, pos.y)
 
 	return &Tile{
-		x:      x,
-		y:      y,
-		width:  scene.cellSize,
-		height: scene.cellSize,
-		value:  value,
+		x:          x,
+		y:          y,
+		width:      scene.cellSize,
+		height:     scene.cellSize,
+		value:      value,
+		fontSize:   20,
+		animations: make(map[*TileAnimation]bool),
 	}
 }
 

@@ -44,10 +44,10 @@ func (field *Field) addRandomTile() (Position, int) {
 	emptyCoordinates := field.getEmptyCoordinates()
 
 	randomPosition := emptyCoordinates[rand.Intn(len(emptyCoordinates))]
-	newValue := 2
+	newValue := 1
 
 	if rand.Intn(4) == 0 {
-		newValue = 3
+		newValue = 2
 	}
 
 	field.put(randomPosition.x, randomPosition.y, newValue)
@@ -123,8 +123,6 @@ func (field *Field) move(externalDirection string, internalDirection string, rev
 			mergeCell(value)
 		}
 
-		fmt.Println(localChanges)
-
 		for i := 0; i < SIZE; i++ {
 			iterators[internalDirection] = i
 
@@ -139,16 +137,20 @@ func (field *Field) move(externalDirection string, internalDirection string, rev
 			for changeNumber, from := range localChanges[i] {
 				remove := changeNumber > 0
 
-				changes = append(changes, FieldChange{
-					from: from,
-					to: Position{
-						x: iterators["x"],
-						y: iterators["y"],
-					},
-					value:  newContent[i],
-					merge:  merge,
-					remove: remove,
-				})
+				to := Position{
+					x: iterators["x"],
+					y: iterators["y"],
+				}
+
+				if from != to || merge || remove {
+					changes = append(changes, FieldChange{
+						from:   from,
+						to:     to,
+						value:  newContent[i],
+						merge:  merge,
+						remove: remove,
+					})
+				}
 			}
 		}
 	}
